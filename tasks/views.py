@@ -7,8 +7,8 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 
-from .models import Task, Need, NeedTrace, TaskLink, Attachment
-from .serializers import TaskSerializer, NeedSerializer, TaskLinkSerializer, AttachmentSerializer
+from .models import Task, Need, NeedTrace, TaskLink, Attachment, Project
+from .serializers import TaskSerializer, NeedSerializer, TaskLinkSerializer, AttachmentSerializer, ProjectSerializer
 
 # ============================================================================ #
 # EXCEPTION MÉTIER
@@ -30,21 +30,42 @@ class TaskViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'title']
     filterset_fields = ['status']
 
-    # ----------------- CREATE -----------------
+    # ----------------- CREATE (single or bulk) -----------------
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        # support JSON { "tasks": [ {...}, {...} ] } or simple single object
+        tasks_data = request.data.get("tasks", None)
+        user = request.user if request.user.is_authenticated else None
+
+        if tasks_data is not None:
+            # ensure mutable list of dicts
+            if not isinstance(tasks_data, list):
+                return Response({"error": "Le champ 'tasks' doit être une liste."}, status=status.HTTP_400_BAD_REQUEST)
+            # Auto-inject owner when missing and user authenticated
+            if user:
+                for item in tasks_data:
+                    item.setdefault("owner", user.id)
+            serializer = self.get_serializer(data=tasks_data, many=True)
+        else:
+            data = request.data.copy()
+            if user and not data.get("owner"):
+                data["owner"] = user.id
+            serializer = self.get_serializer(data=data)
+
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
-        return Response({"message": "Tâche créée", "data": serializer.data}, status=status.HTTP_201_CREATED)
-# ----------------- OVERRIDE perform_create POUR OWNER -----------------
+        return Response({"message": "Tâches créées", "data": serializer.data}, status=status.HTTP_201_CREATED)
+
+    # ----------------- OVERRIDE perform_create POUR OWNER -----------------
     def perform_create(self, serializer):
         """
-        Assigne automatiquement l'owner si l'utilisateur est authentifié
-        et si owner n'est pas fourni dans les données.
+        Pour single: si owner absent et user authentifié, on assigne.
+        Pour many: serializer.save() gère la création en masse.
         """
-        if not serializer.validated_data.get('owner') and self.request.user.is_authenticated:
-            serializer.save(owner=self.request.user)
-        else:
+        try:
+            # DRF ModelSerializer.save accepte kwargs ; pour la plupart des cas, laisser passer
+            serializer.save()
+        except TypeError:
+            # fallback: call without kwargs
             serializer.save()
 
     # ----------------- DESTROY -----------------
@@ -186,3 +207,14 @@ class NeedViewSet(viewsets.ModelViewSet):
         if instance.status == "En cours":
             raise BusinessRuleException("Impossible de supprimer un besoin 'En cours'.")
         return super().destroy(request, *args, **kwargs)
+
+
+# ============================================================================ #
+# PROJECT VIEWSET
+# ============================================================================ #
+class ProjectViewSet(viewsets.ModelViewSet):
+    queryset = Project.objects.all().order_by("-id")
+    serializer_class = ProjectSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(owner=self.request.user if self.request.user.is_authenticated else None)

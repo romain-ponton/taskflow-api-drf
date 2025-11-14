@@ -1,0 +1,139 @@
+{% extends "admin/index.html" %}
+
+{% block extrahead %}
+<style>
+/* Conteneurs principaux */
+.dashboard-summary {
+    display: flex;
+    gap: 30px;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+}
+.dashboard-summary .card {
+    flex: 1 1 200px;
+    background: #2c3e50;
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+/* Kanban */
+.kanban-board {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 40px;
+}
+.kanban-column {
+    flex: 1 1 22%;
+    padding: 15px;
+    border-radius: 5px;
+    color: white;
+    min-height: 200px;
+}
+.kanban-column h2 {
+    font-size: 1.2rem;
+    margin-bottom: 10px;
+}
+.kanban-column ul {
+    list-style: none;
+    padding-left: 0;
+}
+.kanban-column li {
+    padding: 5px 8px;
+    margin-bottom: 5px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Graphique */
+#tasksChart {
+    max-width: 600px;
+    margin-bottom: 50px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Tableau de bord – {{ today }}</h2>
+
+<h3>Résumé du jour</h3>
+<div class="dashboard-summary">
+    <div class="card">
+        <strong>Total tâches créées aujourd'hui:</strong> {{ total_tasks_today }}
+    </div>
+    <div class="card">
+        <strong>Total besoins créés aujourd'hui:</strong> {{ total_needs_today }}
+    </div>
+</div>
+
+<h3>Nouvelles tâches par phase</h3>
+<div class="dashboard-summary">
+    {% for status, data in tasks_by_status.items %}
+        <div class="card" >
+            <h4>{{ status }} ({{ data.tasks|length }})</h4>
+            <ul>
+                {% for task in data.tasks %}
+                    <li>
+                        <a href="{% url 'admin:tasks_task_change' task.id %}" style="color:white; text-decoration:underline;">
+                            {{ task.title }}
+                        </a>
+                        {% if task.owner %} - Owner: {{ task.owner.username }}{% endif %}
+                    </li>
+                {% empty %}
+                    <li>Aucune tâche</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endfor %}
+</div>
+
+<h3>Nouveaux besoins</h3>
+<div class="dashboard-summary">
+    {% for need in new_needs %}
+        <div class="card" style="background:#8e44ad;">
+            {{ need.title }} - Status: {{ need.status }} - Validé: {{ need.is_validated }}
+            {% if need.owner %} - Owner: {{ need.owner.username }}{% endif %}
+        </div>
+    {% empty %}
+        <div class="card" style="background:#7f8c8d;">Aucun besoin créé aujourd'hui</div>
+    {% endfor %}
+</div>
+
+<h3>Diagramme des tâches par phase</h3>
+<canvas id="tasksChart"></canvas>
+
+<!-- Passage des données au JS en JSON sécurisé -->
+{{ tasks_by_status|json_script:"tasks-data" }}
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const tasksData = JSON.parse(document.getElementById("tasks-data").textContent);
+
+    const ctx = document.getElementById('tasksChart').getContext('2d');
+    const labels = Object.keys(tasksData);
+    const dataCounts = labels.map(status => tasksData[status].tasks.length);
+    const backgroundColors = labels.map(status => tasksData[status].color || '#3498db');
+
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Tâches créées aujourd\'hui',
+                data: dataCounts,
+                backgroundColor: backgroundColors
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false },
+                title: { display: true, text: 'Tâches par phase' }
+            }
+        }
+    });
+});
+</script>
+{% endblock %}

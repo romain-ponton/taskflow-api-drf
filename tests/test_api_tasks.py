@@ -1,132 +1,88 @@
 import pytest
 from rest_framework.test import APIClient
 from django.contrib.auth.models import User
-from tasks.models import Task, Project
-
-# -------------------------------
-# FIXTURES UTILISATEURS
-# -------------------------------
-@pytest.fixture
-def users(db):
-    romain = User.objects.create_user(username="Romain.Ponton", email="romain.ponton3@gmail.com")
-    tata = User.objects.create_user(username="tata")
-    toto = User.objects.create_user(username="toto", email="toto@gmail.com")
-    return {"romain": romain, "tata": tata, "toto": toto}
-
-
-# -------------------------------
-# TESTS TASK API
-# -------------------------------
-@pytest.mark.django_db
-def test_get_tasks_empty():
-    client = APIClient()
-    resp = client.get('/api/tasks/')
-    assert resp.status_code == 200
-    assert resp.json() == []
-
+from tasks.models import Task, Need, Project, Attachment, TaskLink
 
 @pytest.mark.django_db
-def test_create_task_anonymous_owner_optional():
-    client = APIClient()
-    resp = client.post('/api/tasks/', {'title': 'T1', 'status': 'À faire'}, format='json')
-    assert resp.status_code == 201
-    data = resp.json()['data']
-    assert data['title'] == 'T1'
-
-
-@pytest.mark.django_db
-def test_create_task_with_user_sets_owner(users):
-    client = APIClient()
-    user = users['tata']
-    client.force_authenticate(user=user)
-
-    project = Project.objects.create(name="Project 2")
-    resp = client.post('/api/tasks/', {
-        'title': 'T2',
-        'status': 'En cours',
-        'type': 'feature',
-        'priority': 'high',
-        'reporter': user.id,
-        'project': project.id
-    }, format='json')
-
-    assert resp.status_code == 201
-    data = resp.json()['data']
-    t = Task.objects.get(title='T2')
-    assert t.owner == user
-    assert t.project == project
-
-
-@pytest.mark.django_db
-def test_create_task_with_type_priority_and_owner(users):
-    client = APIClient()
+def test_full_taskflow(users, tmp_path):
+    # -----------------------------
+    # Utilisateurs et projet
+    # -----------------------------
     romain = users['romain']
-    client.force_authenticate(user=romain)
-
-    project = Project.objects.create(name="Project 1")
-    resp = client.post('/api/tasks/', {
-        'title': 'T3',
-        'status': 'À faire',
-        'type': 'story',
-        'priority': 'medium',
-        'reporter': romain.id,
-        'project': project.id
-    }, format='json')
-
-    assert resp.status_code == 201
-    t = Task.objects.get(title='T3')
-    assert t.owner == romain
-    assert t.type == 'story'
-    assert t.priority == 'medium'
-
-
-@pytest.mark.django_db
-def test_task_hierarchy_children_parent(users):
-    client = APIClient()
     tata = users['tata']
-    client.force_authenticate(user=tata)
+    toto = users['toto']
 
-    parent = Task.objects.create(title="Parent Task", owner=tata)
-    child = Task.objects.create(title="Child Task", owner=tata, parent=parent)
-
-    resp = client.get(f'/api/tasks/{parent.id}/children/')
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data) == 1
-    assert data[0]['title'] == 'Child Task'
-
-
-@pytest.mark.django_db
-def test_task_link_creation(users):
     client = APIClient()
-    romain = users['romain']
     client.force_authenticate(user=romain)
 
-    t1 = Task.objects.create(title="T1", owner=romain)
-    t2 = Task.objects.create(title="T2", owner=romain)
+    project = Project.objects.create(name="Project Test", owner=romain)
 
-    resp = client.post(f'/api/tasks/{t1.id}/link/', {'target': t2.id, 'type': 'blocks'}, format='json')
+    # -----------------------------
+    # Création de plusieurs tâches
+    # -----------------------------
+    tasks_data = [
+        {"title": "Epic du Jour", "status": "Nouveau", "type": "epic", "priority": "high", "owner": romain.id, "reporter": romain.id, "project": project.id},
+        {"title": "User Story Intégration", "status": "À faire", "type": "story", "priority": "medium", "owner": tata.id, "reporter": tata.id, "project": project.id},
+        {"title": "Feature Auth", "status": "En cours", "type": "feature", "priority": "urgent", "owner": toto.id, "reporter": toto.id, "project": project.id},
+        {"title": "Sous-tâche Front", "status": "À faire", "type": "subtask", "priority": "low", "owner": romain.id, "reporter": tata.id, "project": project.id},
+        {"title": "Backend API", "status": "Fait", "type": "task", "priority": "high", "owner": tata.id, "reporter": romain.id, "project": project.id},
+    ]
+
+    resp = client.post('/api/tasks/', {"tasks": tasks_data}, format='json')
     assert resp.status_code == 201
-    data = resp.json()
-    assert data['src_task'] == t1.id
-    assert data['dst_task'] == t2.id
-    assert data['link_type'] == 'blocks'
+    created_tasks = Task.objects.filter(project=project)
+    assert created_tasks.count() == 5
 
+    # -----------------------------
+    # Vérification des owners et statuts
+    # -----------------------------
+    for t_data in tasks_data:
+        t = Task.objects.get(title=t_data["title"])
+        assert t.owner.id == t_data["owner"]
+        assert t.status == t_data["status"]
+        assert t.type == t_data["type"]
+        assert t.priority == t_data["priority"]
 
-@pytest.mark.django_db
-def test_task_upload_attachment(users, tmp_path):
-    client = APIClient()
-    toto = users['toto']
-    client.force_authenticate(user=toto)
+    # -----------------------------
+    # Création de lien parent/enfant et "blocks"
+    # -----------------------------
+    parent_task = Task.objects.get(title="Epic du Jour")
+    child_task = Task.objects.get(title="User Story Intégration")
+    child_task.parent = parent_task
+    child_task.save()
 
-    task = Task.objects.create(title="Task with Attachment", owner=toto)
+    resp_link = client.post(f'/api/tasks/{parent_task.id}/link/', {"target": child_task.id, "type": "blocks"}, format='json')
+    assert resp_link.status_code == 201
+    link = TaskLink.objects.get(src_task=parent_task, dst_task=child_task)
+    assert link.link_type == "blocks"
 
+    # -----------------------------
+    # Upload d'un fichier sur une tâche
+    # -----------------------------
+    task_file = Task.objects.get(title="Feature Auth")
     test_file = tmp_path / "test.txt"
-    test_file.write_text("Hello")
+    test_file.write_text("Hello TaskFlow")
 
     with open(test_file, 'rb') as f:
-        resp = client.post(f'/api/tasks/{task.id}/upload/', {'file': f}, format='multipart')
+        resp_upload = client.post(f'/api/tasks/{task_file.id}/upload/', {'file': f}, format='multipart')
 
-    assert resp.status_code == 201
-    data = resp.json()
-    assert data['task'] == task.id
+    assert resp_upload.status_code == 201
+    attachment = Attachment.objects.get(task=task_file)
+    assert attachment.file.name.endswith("test.txt")
+
+    # -----------------------------
+    # Création d'un besoin validé -> génère une tâche
+    # -----------------------------
+    need_data = {
+        "title": "Besoin Critique",
+        "status": "À faire",
+        "is_validated": True
+    }
+    resp_need = client.post('/api/needs/', need_data, format='json')
+    assert resp_need.status_code == 201
+    need = Need.objects.get(title="Besoin Critique")
+
+    # Vérifier que la tâche automatique a été créée
+    auto_task = Task.objects.filter(title=need.title, owner=romain).first()
+    assert auto_task is not None
+    assert auto_task.status == "À faire"

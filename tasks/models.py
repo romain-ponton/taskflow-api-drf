@@ -28,13 +28,55 @@ PRIORITY = [
 
 # --- Projet ---
 class Project(models.Model):
+    # Identité
     name = models.CharField(max_length=200)
+    code = models.CharField(max_length=50, unique=True, default="Default")   # exemple : TF, APP, CRM
     description = models.TextField(blank=True)
-    created_at = models.DateTimeField(default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
+    color = models.CharField(max_length=7, default="#3B82F6")  # couleur hex
+    icon = models.CharField(max_length=50, default="folder")  # nom d'icône (frontend)
+
+    # Organisation
+    owner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="owned_projects")
+    members = models.ManyToManyField(User, through="ProjectMember", related_name="projects")
+
+    # Gestion du temps
+    start_date = models.DateField(null=True, blank=True)
+    due_date = models.DateField(null=True, blank=True)
+
+    # Audit
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return self.name
+        return f"{self.code} – {self.name}"
+
+    @property
+    def progression(self):
+        """ % des tâches faites """
+        tasks = self.tasks.all()
+        if not tasks.exists():
+            return 0
+        done = tasks.filter(status="Fait").count()
+        return round((done / tasks.count()) * 100)
+
+
+class ProjectMember(models.Model):
+    ROLE_CHOICES = [
+        ("viewer", "Viewer"),
+        ("developer", "Developer"),
+        ("maintainer", "Maintainer"),
+        ("owner", "Owner"),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    project = models.ForeignKey(Project, on_delete=models.CASCADE)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="viewer")
+
+    class Meta:
+        unique_together = ("user", "project")
+
+    def __str__(self):
+        return f"{self.user} – {self.project} ({self.role})"
+
 
 # --- Tâche ---
 class Task(models.Model):
@@ -64,7 +106,8 @@ class Task(models.Model):
             raise ValidationError("Une tâche ne peut pas être son propre parent.")
         ancestor = self.parent
         while ancestor:
-            if ancestor == self:
+            # comparer par pk est plus sûr
+            if ancestor.pk == (self.pk or None):
                 raise ValidationError("Cycle détecté dans la hiérarchie.")
             ancestor = ancestor.parent
         if not (0 <= self.progress <= 100):
@@ -72,6 +115,7 @@ class Task(models.Model):
 
     def __str__(self):
         return f"{self.title} (id={self.id})"
+
 
 # --- Relations entre tâches ---
 class TaskLink(models.Model):
@@ -95,9 +139,11 @@ class TaskLink(models.Model):
     def __str__(self):
         return f"{self.src_task_id} -> {self.dst_task_id} ({self.link_type})"
 
+
 # --- Attachments ---
 def attachment_path(instance, filename):
     return f"attachments/task_{instance.task.id}/{filename}"
+
 
 class Attachment(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="attachments")
@@ -107,6 +153,7 @@ class Attachment(models.Model):
 
     def __str__(self):
         return f"Attachment {self.id} for Task {self.task.id}"
+
 
 # --- Need / NeedTrace ---
 class Need(models.Model):
@@ -119,6 +166,7 @@ class Need(models.Model):
 
     def __str__(self):
         return self.title
+
 
 class NeedTrace(models.Model):
     need = models.ForeignKey(Need, on_delete=models.CASCADE, related_name="traces")

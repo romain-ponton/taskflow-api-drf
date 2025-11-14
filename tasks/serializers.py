@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import Task, Need, NeedTrace, TaskLink, Attachment, Project
+from .models import Task, Need, NeedTrace, TaskLink, Attachment, Project, ProjectMember
 
 
 # ----------------------------
@@ -15,10 +15,24 @@ class UserSerializer(serializers.ModelSerializer):
 # ----------------------------
 # PROJECT SERIALIZER
 # ----------------------------
+class ProjectMemberSerializer(serializers.ModelSerializer):
+    username = serializers.ReadOnlyField(source="user.username")
+
+    class Meta:
+        model = ProjectMember
+        fields = ["id", "username", "role"]
+
+
 class ProjectSerializer(serializers.ModelSerializer):
+    owner = serializers.ReadOnlyField(source="owner.username")
+    progression = serializers.ReadOnlyField()
+    members = ProjectMemberSerializer(source="projectmember_set", many=True, read_only=True)
+
     class Meta:
         model = Project
         fields = "__all__"
+        read_only_fields = ["owner", "created_at", "progression"]
+
 
 
 # ----------------------------
