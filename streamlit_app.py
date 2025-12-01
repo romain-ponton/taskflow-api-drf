@@ -3,6 +3,9 @@ import requests
 import streamlit as st
 import json
 
+# -----------------------------
+# Config Streamlit
+# -----------------------------
 st.set_page_config(page_title="TaskFlow – Kanban Drag & Drop", layout="wide")
 st.title("TaskFlow – Kanban (Trello-like)")
 
@@ -28,25 +31,37 @@ STATUS_BG_COLOR = {
 # -----------------------------
 # API
 # -----------------------------
-@st.cache_data(ttl=30)
+@st.cache(ttl=30)
 def fetch_tasks():
-    resp = requests.get(f"{API_BASE}/api/tasks/", timeout=API_TIMEOUT)
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp = requests.get(f"{API_BASE}/api/tasks/", timeout=API_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Impossible de récupérer les tâches : {e}")
+        return []
 
 def update_task_status(task_id: int, status: str):
-    url = f"{API_BASE}/api/tasks/{task_id}/"
-    payload = {"status": status}
-    resp = requests.patch(url, json=payload, timeout=API_TIMEOUT)
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        url = f"{API_BASE}/api/tasks/{task_id}/"
+        payload = {"status": status}
+        resp = requests.patch(url, json=payload, timeout=API_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Erreur API lors du déplacement : {e}")
+        return None
 
 def create_task(title: str, task_type: str, priority: str):
-    url = f"{API_BASE}/api/tasks/"
-    payload = {"title": title, "type": task_type, "priority": priority, "status": "Nouveau"}
-    resp = requests.post(url, json=payload, timeout=API_TIMEOUT)
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        url = f"{API_BASE}/api/tasks/"
+        payload = {"title": title, "type": task_type, "priority": priority, "status": "Nouveau"}
+        resp = requests.post(url, json=payload, timeout=API_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Erreur API lors de la création : {e}")
+        return None
 
 # -----------------------------
 # SESSION STATE
@@ -67,12 +82,11 @@ with st.sidebar.form("new_task"):
     new_priority = st.selectbox("Priorité", ["low", "medium", "high", "urgent"])
     submitted_task = st.form_submit_button("Créer")
     if submitted_task:
-        try:
-            task = create_task(new_title, new_type, new_priority)
+        task = create_task(new_title, new_type, new_priority)
+        if task:
             st.session_state.tasks.append(task)
             st.success("Tâche créée !")
-        except Exception as e:
-            st.error(f"Erreur création tâche : {e}")
+            st.experimental_rerun()  # Rafraîchir l'affichage
 
 # -----------------------------
 # Metrics
@@ -88,7 +102,6 @@ col3.metric("Terminé", len([t for t in filtered_tasks if t["status"]=="Fait"]))
 # Kanban Columns avec “déposer ici”
 # -----------------------------
 st.subheader("Kanban")
-
 cols = st.columns(len(ALL_STATUSES))
 
 for idx, status in enumerate(ALL_STATUSES):
@@ -103,21 +116,18 @@ for idx, status in enumerate(ALL_STATUSES):
                 f"<span style='background:{PRIORITY_COLOR[task['priority']]};color:black;padding:2px 6px;border-radius:4px;font-size:12px'>{task['priority']}</span>"
                 f"</div>", unsafe_allow_html=True
             )
-            # Bouton pour sélectionner la tâche
             if st.button(f"Déplacer #{task['id']}", key=f"select_{task['id']}"):
                 st.session_state.selected_task = task['id']
 
-        # Si une tâche est sélectionnée, on peut la déposer ici
+        # Bouton déposer ici
         if st.session_state.selected_task and st.session_state.selected_task not in [t["id"] for t in st.session_state.tasks if t["status"] == status]:
             if st.button(f"Déposer ici", key=f"drop_{status}"):
-                try:
-                   updated_task = update_task_status(st.session_state.selected_task, status)
-                   for i, t in enumerate(st.session_state.tasks):
+                updated_task = update_task_status(st.session_state.selected_task, status)
+                if updated_task:
+                    for i, t in enumerate(st.session_state.tasks):
                         if t["id"] == updated_task["id"]:
                             st.session_state.tasks[i] = updated_task
                             break
-                        st.session_state.selected_task = None
-                        st.success("Tâche déplacée !")
-                        st.experimental_rerun()  # <- déclenche le refresh unique et automatique
-                except Exception as e:
-                        st.error(f"Erreur déplacement : {e}")
+                    st.session_state.selected_task = None
+                    st.success("Tâche déplacée !")
+                    st.experimental_rerun()
