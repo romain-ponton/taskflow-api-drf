@@ -1,0 +1,23 @@
+# Backend Django
+Django>=4.2
+djangorestframework>=3.14
+django-filter>=23.2
+drf-yasg>=1.21
+
+# Frontend Streamlit
+streamlit>=1.24
+
+# API calls
+requests>=2.32
+
+# Production server pour Render
+gunicorn>=21.2
+
+# Librairies utiles
+numpy>=1.26
+pandas>=2.3
+python-dateutil>=2.9
+PyYAML>=6.0
+
+# Optionnel (si besoin pour le déploiement ou cache)
+cachetools>=6.2
