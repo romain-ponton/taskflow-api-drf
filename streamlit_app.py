@@ -1,7 +1,6 @@
 import os
 import requests
 import streamlit as st
-import json
 
 # -----------------------------
 # Config Streamlit
@@ -9,6 +8,7 @@ import json
 st.set_page_config(page_title="TaskFlow – Kanban Drag & Drop", layout="wide")
 st.title("TaskFlow – Kanban (Trello-like)")
 
+# URL du backend (Render ou local)
 API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
 API_TIMEOUT = 8
 
@@ -31,8 +31,9 @@ STATUS_BG_COLOR = {
 # -----------------------------
 # API
 # -----------------------------
-@st.cache(ttl=30)
+@st.cache_data(ttl=30)
 def fetch_tasks():
+    """Récupère la liste des tâches depuis l'API"""
     try:
         resp = requests.get(f"{API_BASE}/api/tasks/", timeout=API_TIMEOUT)
         resp.raise_for_status()
@@ -42,6 +43,7 @@ def fetch_tasks():
         return []
 
 def update_task_status(task_id: int, status: str):
+    """Met à jour le statut d'une tâche via l'API"""
     try:
         url = f"{API_BASE}/api/tasks/{task_id}/"
         payload = {"status": status}
@@ -53,6 +55,7 @@ def update_task_status(task_id: int, status: str):
         return None
 
 def create_task(title: str, task_type: str, priority: str):
+    """Crée une nouvelle tâche via l'API"""
     try:
         url = f"{API_BASE}/api/tasks/"
         payload = {"title": title, "type": task_type, "priority": priority, "status": "Nouveau"}
@@ -64,16 +67,15 @@ def create_task(title: str, task_type: str, priority: str):
         return None
 
 # -----------------------------
-# SESSION STATE
+# Session State
 # -----------------------------
 if "tasks" not in st.session_state:
     st.session_state.tasks = fetch_tasks()
-
 if "selected_task" not in st.session_state:
     st.session_state.selected_task = None
 
 # -----------------------------
-# Sidebar – création tâche
+# Sidebar – Création de tâche
 # -----------------------------
 st.sidebar.subheader("Nouvelle tâche")
 with st.sidebar.form("new_task"):
@@ -86,20 +88,20 @@ with st.sidebar.form("new_task"):
         if task:
             st.session_state.tasks.append(task)
             st.success("Tâche créée !")
-            st.experimental_rerun()  # Rafraîchir l'affichage
+            st.experimental_rerun()
 
 # -----------------------------
 # Metrics
 # -----------------------------
 st.subheader("Résumé des tâches")
 col1, col2, col3 = st.columns(3)
-filtered_tasks = st.session_state.tasks
-col1.metric("Total", len(filtered_tasks))
-col2.metric("En cours", len([t for t in filtered_tasks if t["status"]=="En cours"]))
-col3.metric("Terminé", len([t for t in filtered_tasks if t["status"]=="Fait"]))
+tasks = st.session_state.tasks
+col1.metric("Total", len(tasks))
+col2.metric("En cours", len([t for t in tasks if t["status"] == "En cours"]))
+col3.metric("Terminé", len([t for t in tasks if t["status"] == "Fait"]))
 
 # -----------------------------
-# Kanban Columns avec “déposer ici”
+# Kanban Columns
 # -----------------------------
 st.subheader("Kanban")
 cols = st.columns(len(ALL_STATUSES))
@@ -107,7 +109,7 @@ cols = st.columns(len(ALL_STATUSES))
 for idx, status in enumerate(ALL_STATUSES):
     with cols[idx]:
         st.markdown(f"### {status}")
-        for task in [t for t in st.session_state.tasks if t["status"] == status]:
+        for task in [t for t in tasks if t["status"] == status]:
             color = PRIORITY_COLOR.get(task["priority"], STATUS_BG_COLOR.get(status, "#fff"))
             st.markdown(
                 f"<div style='background:{color};padding:10px;border-radius:10px;margin-bottom:10px'>"
@@ -119,12 +121,12 @@ for idx, status in enumerate(ALL_STATUSES):
             if st.button(f"Déplacer #{task['id']}", key=f"select_{task['id']}"):
                 st.session_state.selected_task = task['id']
 
-        # Bouton déposer ici
-        if st.session_state.selected_task and st.session_state.selected_task not in [t["id"] for t in st.session_state.tasks if t["status"] == status]:
+        # Bouton "Déposer ici"
+        if st.session_state.selected_task and st.session_state.selected_task not in [t["id"] for t in tasks if t["status"] == status]:
             if st.button(f"Déposer ici", key=f"drop_{status}"):
                 updated_task = update_task_status(st.session_state.selected_task, status)
                 if updated_task:
-                    for i, t in enumerate(st.session_state.tasks):
+                    for i, t in enumerate(tasks):
                         if t["id"] == updated_task["id"]:
                             st.session_state.tasks[i] = updated_task
                             break
