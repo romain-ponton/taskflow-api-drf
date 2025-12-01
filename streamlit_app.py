@@ -1,7 +1,7 @@
 import os
-import uuid
 import requests
 import streamlit as st
+import uuid
 
 st.set_page_config(page_title="TaskFlow – Kanban", layout="wide")
 st.title("TaskFlow – Board (Jira-like)")
@@ -13,7 +13,6 @@ API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
 DEMO_MODE = os.getenv("DEMO", "0") == "1"
 API_TIMEOUT = 8
 
-# Normalisation des statuts
 AUTO_STATUS_CANON = {
     "a faire": "À faire",
     "à faire": "À faire",
@@ -24,15 +23,6 @@ AUTO_STATUS_CANON = {
     "Fait": "Fait"
 }
 
-# Colonnes Kanban
-KANBAN_COLUMNS = {
-    "Backlog": ["Nouveau", "À faire"],
-    "Sélectionné": ["À faire"],
-    "En cours": ["En cours"],
-    "Terminé": ["Fait"],
-}
-
-# Couleurs par priorité
 PRIORITY_COLOR = {
     "low": "#d3f9d8",
     "medium": "#fff3bf",
@@ -68,7 +58,7 @@ def create_task(title: str, task_type: str, priority: str):
     return resp.json()
 
 # ------------------------------
-# SIDEBAR – FILTRES + Création
+# Sidebar – FILTRES + Création
 # ------------------------------
 st.sidebar.header("Filtres")
 with st.sidebar.form("filters"):
@@ -92,7 +82,7 @@ with st.sidebar.form("new_task"):
             st.error(f"Erreur création tâche : {e}")
 
 # ------------------------------
-# CHARGEMENT DES DONNÉES
+# Chargement des tâches
 # ------------------------------
 try:
     tasks = fetch_tasks()
@@ -102,9 +92,7 @@ except Exception as e:
 
 # Normalisation des statuts
 for task in tasks:
-    raw = task.get("status", "")
-    canon = AUTO_STATUS_CANON.get(raw, raw)
-    task["status"] = canon
+    task["status"] = AUTO_STATUS_CANON.get(task.get("status", ""), task.get("status", ""))
 
 # ------------------------------
 # FILTRES
@@ -134,23 +122,22 @@ col3.metric("Terminé", len([t for t in filtered if t["status"]=="Fait"]))
 # ------------------------------
 def render_task_card(task):
     color = PRIORITY_COLOR.get(task["priority"], "#f1f3f5")
-    st.markdown(f"<div style='padding:10px; margin-bottom:10px; background-color:{color}; border-radius:8px;'>"
-                f"<b>#{task['id']} – {task['title']}</b><br>"
-                f"Type : {task['type']} • Priorité : {task['priority']}</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='padding:10px; margin-bottom:10px; background-color:{color}; border-radius:8px;'>"
+        f"<b>#{task['id']} – {task['title']}</b><br>"
+        f"Type : {task['type']} • Priorité : {task['priority']}</div>",
+        unsafe_allow_html=True
+    )
 
-    if "screenshot" in task and task["screenshot"]:
-        st.image(task["screenshot"], width=200)
-
-    # Sélecteur statut
-    all_statuses = sorted({s for values in KANBAN_COLUMNS.values() for s in values})
+    all_statuses = sorted({t["status"] for t in tasks})
     widget_key = f"select_{task['id']}_{uuid.uuid4()}"
-    new_status = st.selectbox("Changer statut", options=[""] + all_statuses, index=0, key=widget_key)
+    new_status = st.selectbox("Changer statut", options=all_statuses, index=all_statuses.index(task["status"]), key=widget_key)
 
     button_key = f"save_{task['id']}_{uuid.uuid4()}"
     if st.button("Enregistrer", key=button_key):
         if not new_status:
             st.warning("Choisir un statut.")
-        else:
+        elif new_status != task["status"]:
             try:
                 update_task_status(task["id"], new_status)
                 st.success("Statut mis à jour.")
@@ -162,11 +149,12 @@ def render_task_card(task):
 # Affichage Kanban
 # ------------------------------
 st.subheader("Kanban")
-cols = st.columns(len(KANBAN_COLUMNS))
-for col_index, (col_name, statuses) in enumerate(KANBAN_COLUMNS.items()):
+all_statuses = sorted({t["status"] for t in filtered})
+cols = st.columns(len(all_statuses))
+for col_index, status in enumerate(all_statuses):
     with cols[col_index]:
-        with st.expander(col_name, expanded=True):
-            col_tasks = [t for t in filtered if t["status"] in statuses]
+        with st.expander(status, expanded=True):
+            col_tasks = [t for t in filtered if t["status"] == status]
             if not col_tasks:
                 st.caption("Aucune tâche")
             for task in col_tasks:
