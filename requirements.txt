@@ -1,8 +1,10 @@
-# Backend Django
 Django>=4.2
 djangorestframework>=3.14
 django-filter>=23.2
 drf-yasg>=1.21
+djangorestframework-simplejwt>=6.3
+gunicorn>=21.2
+
 
 # Frontend Streamlit
 streamlit>=1.24

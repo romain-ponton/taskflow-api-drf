@@ -8,9 +8,9 @@ import streamlit as st
 st.set_page_config(page_title="TaskFlow – Kanban Drag & Drop", layout="wide")
 st.title("TaskFlow – Kanban (Trello-like)")
 
-# URL publique de Render
+# URL publique du backend Render
 API_BASE = os.getenv("API_BASE", "https://taskflow-backend.onrender.com")
-API_TIMEOUT = 20  # Timeout un peu plus long
+API_TIMEOUT = 20  # Timeout plus long pour éviter les erreurs
 
 ALL_STATUSES = ["Nouveau", "À faire", "En cours", "Fait"]
 ALL_TYPES = ["task", "story", "subtask", "feature", "epic"]
