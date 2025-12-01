@@ -1,130 +1,173 @@
-# streamlit_app.py
 import os
+import uuid
 import requests
 import streamlit as st
-from typing import List, Dict, Any
 
-st.set_page_config(page_title="TaskFlow – Board", layout="wide")
+st.set_page_config(page_title="TaskFlow – Kanban", layout="wide")
 st.title("TaskFlow – Board (Jira-like)")
 
+# ------------------------------
+# CONFIG
+# ------------------------------
 API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
-USE_DEMO = os.getenv("DEMO", "0") == "1"
-API_TIMEOUT = 8  # seconds
+DEMO_MODE = os.getenv("DEMO", "0") == "1"
+API_TIMEOUT = 8
 
-# mapping colonnes -> valeurs de status attendues par l'API
-STATUS_COLUMNS = [
-    ("Backlog", ["À faire", "Nouveau"]),
-    ("Sélectionné", ["Sélectionné", "À faire"]),
-    ("En cours", ["En cours"]),
-    ("Terminé", ["Fait", "Terminé"]),
-]
+# Normalisation des statuts
+AUTO_STATUS_CANON = {
+    "a faire": "À faire",
+    "à faire": "À faire",
+    "A faire": "À faire",
+    "À faire": "À faire",
+    "Nouveau": "Nouveau",
+    "En cours": "En cours",
+    "Fait": "Fait"
+}
 
+# Colonnes Kanban
+KANBAN_COLUMNS = {
+    "Backlog": ["Nouveau", "À faire"],
+    "Sélectionné": ["À faire"],
+    "En cours": ["En cours"],
+    "Terminé": ["Fait"],
+}
 
-@st.cache_data(ttl=60)
-def fetch_tasks() -> List[Dict[str, Any]]:
-    if USE_DEMO:
+# Couleurs par priorité
+PRIORITY_COLOR = {
+    "low": "#d3f9d8",
+    "medium": "#fff3bf",
+    "high": "#ffc9c9",
+    "urgent": "#ff6b6b"
+}
+
+# ------------------------------
+# API CALLS
+# ------------------------------
+@st.cache_data(ttl=30)
+def fetch_tasks():
+    if DEMO_MODE:
         import json
-        demo_path = os.path.join(os.path.dirname(__file__), "demo_tasks.json")
-        with open(demo_path, "r", encoding="utf-8") as f:
+        with open("demo_tasks.json", "r", encoding="utf-8") as f:
             return json.load(f)
     resp = requests.get(f"{API_BASE}/api/tasks/", timeout=API_TIMEOUT)
     resp.raise_for_status()
     return resp.json()
 
-
-def patch_task_status(task_id: int, new_status: str) -> Dict[str, Any]:
-    """Envoie un PATCH simple pour mettre à jour le statut d'une tâche."""
+def update_task_status(task_id: int, status: str):
     url = f"{API_BASE}/api/tasks/{task_id}/"
-    payload = {"status": new_status}
-    headers = {"Content-Type": "application/json"}
-    resp = requests.patch(url, json=payload, headers=headers, timeout=API_TIMEOUT)
+    payload = {"status": status}
+    resp = requests.patch(url, json=payload, timeout=API_TIMEOUT)
     resp.raise_for_status()
     return resp.json()
 
+def create_task(title: str, task_type: str, priority: str):
+    url = f"{API_BASE}/api/tasks/"
+    payload = {"title": title, "type": task_type, "priority": priority, "status": "Nouveau"}
+    resp = requests.post(url, json=payload, timeout=API_TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
 
-# Sidebar : filtres
+# ------------------------------
+# SIDEBAR – FILTRES + Création
+# ------------------------------
 st.sidebar.header("Filtres")
-with st.sidebar.form(key="filters"):
-    q = st.text_input("Recherche (titre / description)", value="")
-    project = st.text_input("Projet (exact)", value="")
-    task_type = st.text_input("Type (ex: Étude, Bug...)", value="")
-    priority = st.selectbox("Priorité", options=["", "Basse", "Moyenne", "Haute"])
-    show_screenshots = st.checkbox("Afficher screenshots (si fournis)", value=False)
-    submitted = st.form_submit_button("Appliquer")
+with st.sidebar.form("filters"):
+    q = st.text_input("Recherche")
+    priority_filter = st.selectbox("Priorité", ["", "low", "medium", "high", "urgent"])
+    task_type_filter = st.selectbox("Type", ["", "task", "story", "subtask", "feature", "epic"])
+    submitted_filter = st.form_submit_button("Appliquer")
 
-# Charger les tâches
-with st.spinner("Chargement des tâches…"):
-    try:
-        tasks = fetch_tasks()
-        st.success(f"{len(tasks)} tâches chargées.")
-    except Exception as e:
-        st.error(f"Impossible de joindre l'API : {e}")
-        st.stop()
+st.sidebar.subheader("Nouvelle tâche")
+with st.sidebar.form("new_task"):
+    new_title = st.text_input("Titre")
+    new_type = st.selectbox("Type", ["task", "story", "subtask", "feature", "epic"])
+    new_priority = st.selectbox("Priorité", ["low", "medium", "high", "urgent"])
+    submitted_task = st.form_submit_button("Créer")
+    if submitted_task:
+        try:
+            create_task(new_title, new_type, new_priority)
+            st.success("Tâche créée !")
+            st.experimental_rerun()
+        except Exception as e:
+            st.error(f"Erreur création tâche : {e}")
 
-# Appliquer filtres localement
-def matches(task):
-    if q and not (q.lower() in (task.get("title") or "").lower() or q.lower() in (task.get("description") or "").lower()):
+# ------------------------------
+# CHARGEMENT DES DONNÉES
+# ------------------------------
+try:
+    tasks = fetch_tasks()
+except Exception as e:
+    st.error(f"Impossible de joindre l'API : {e}")
+    st.stop()
+
+# Normalisation des statuts
+for task in tasks:
+    raw = task.get("status", "")
+    canon = AUTO_STATUS_CANON.get(raw, raw)
+    task["status"] = canon
+
+# ------------------------------
+# FILTRES
+# ------------------------------
+def match_filters(t):
+    if q and q.lower() not in t["title"].lower():
         return False
-    if project and project != (task.get("project") or ""):
+    if priority_filter and t["priority"] != priority_filter:
         return False
-    if task_type and task_type != (task.get("task_type") or ""):
-        return False
-    if priority and priority != (task.get("priority") or ""):
+    if task_type_filter and t["type"] != task_type_filter:
         return False
     return True
 
-filtered_tasks = [t for t in tasks if matches(t)]
+filtered = [t for t in tasks if match_filters(t)]
 
-# Layout Kanban
-st.subheader("Board Kanban")
-cols = st.columns(len(STATUS_COLUMNS))
+# ------------------------------
+# Metrics
+# ------------------------------
+st.subheader("Résumé des tâches")
+col1, col2, col3 = st.columns(3)
+col1.metric("Total", len(filtered))
+col2.metric("En cours", len([t for t in filtered if t["status"]=="En cours"]))
+col3.metric("Terminé", len([t for t in filtered if t["status"]=="Fait"]))
 
-# helper pour afficher une carte
+# ------------------------------
+# Rendu des cartes
+# ------------------------------
 def render_task_card(task):
-    st.markdown(f"**{task.get('key','')} — [{task.get('task_type')}] {task.get('title')}**")
-    meta = f"Projet : {task.get('project') or '—'} · Priorité : {task.get('priority') or '—'}"
-    st.caption(meta)
-    owner = task.get("owner") or "—"
-    st.caption(f"Owner : {owner}")
-    desc = (task.get("description") or "")
-    if desc:
-        st.write(desc if len(desc) < 240 else desc[:240] + "…")
-    if show_screenshots and task.get("screenshot_url"):
-        try:
-            st.image(task["screenshot_url"], use_column_width=True)
-        except Exception:
-            st.caption("Screenshot non disponible.")
-    # actions: changer statut via selectbox
-    statuses_available = []
-    # rassembler toutes valeurs uniques connues dans le mapping (utile si l'API a d'autres valeurs)
-    for _, vals in STATUS_COLUMNS:
-        statuses_available.extend(vals)
-    statuses_available = sorted(set(statuses_available))
-    new_status = st.selectbox("Changer de statut", options=[""] + statuses_available, index=0, key=f"status_{task['id']}")
-    if st.button("Enregistrer", key=f"save_{task['id']}"):
+    color = PRIORITY_COLOR.get(task["priority"], "#f1f3f5")
+    st.markdown(f"<div style='padding:10px; margin-bottom:10px; background-color:{color}; border-radius:8px;'>"
+                f"<b>#{task['id']} – {task['title']}</b><br>"
+                f"Type : {task['type']} • Priorité : {task['priority']}</div>", unsafe_allow_html=True)
+
+    if "screenshot" in task and task["screenshot"]:
+        st.image(task["screenshot"], width=200)
+
+    # Sélecteur statut
+    all_statuses = sorted({s for values in KANBAN_COLUMNS.values() for s in values})
+    widget_key = f"select_{task['id']}_{uuid.uuid4()}"
+    new_status = st.selectbox("Changer statut", options=[""] + all_statuses, index=0, key=widget_key)
+
+    button_key = f"save_{task['id']}_{uuid.uuid4()}"
+    if st.button("Enregistrer", key=button_key):
         if not new_status:
-            st.warning("Choisir un statut avant d'enregistrer.")
+            st.warning("Choisir un statut.")
         else:
             try:
-                patch_task_status(task["id"], new_status)
+                update_task_status(task["id"], new_status)
                 st.success("Statut mis à jour.")
                 st.experimental_rerun()
             except Exception as e:
-                st.error(f"Échec mise à jour : {e}")
+                st.error(f"Erreur : {e}")
 
-# Pour chaque colonne, afficher les tâches correspondantes
-for col_idx, (col_title, status_values) in enumerate(STATUS_COLUMNS):
-    with cols[col_idx]:
-        st.markdown(f"### {col_title}")
-        column_tasks = [t for t in filtered_tasks if (t.get("status") or "") in status_values]
-        if not column_tasks:
-            st.caption("Aucune tâche")
-        for task in column_tasks:
-            with st.container():
+# ------------------------------
+# Affichage Kanban
+# ------------------------------
+st.subheader("Kanban")
+cols = st.columns(len(KANBAN_COLUMNS))
+for col_index, (col_name, statuses) in enumerate(KANBAN_COLUMNS.items()):
+    with cols[col_index]:
+        with st.expander(col_name, expanded=True):
+            col_tasks = [t for t in filtered if t["status"] in statuses]
+            if not col_tasks:
+                st.caption("Aucune tâche")
+            for task in col_tasks:
                 render_task_card(task)
-                st.markdown("---")
-
-# Footer / debug
-st.sidebar.markdown("---")
-st.sidebar.write("API_BASE =", API_BASE)
-st.sidebar.write("DEMO mode =", USE_DEMO)
