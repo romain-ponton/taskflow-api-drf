@@ -8,8 +8,8 @@ import streamlit as st
 st.set_page_config(page_title="TaskFlow – Kanban Drag & Drop", layout="wide")
 st.title("TaskFlow – Kanban (Trello-like)")
 
-# URL publique du backend Render
-API_BASE = os.getenv("API_BASE", "https://taskflow-backend.onrender.com")
+# Backend local par defaut. Surcharger avec API_BASE en production.
+API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
 API_TIMEOUT = 20  # Timeout plus long pour éviter les erreurs
 
 ALL_STATUSES = ["Nouveau", "À faire", "En cours", "Fait"]
@@ -45,7 +45,7 @@ if st.session_state.token is None:
                 resp.raise_for_status()
                 st.session_state.token = resp.json()["access"]
                 st.success("Connecté avec succès !")
-                st.experimental_rerun()
+                st.rerun()
             except requests.exceptions.RequestException as e:
                 st.error(f"Erreur de connexion : {e}")
 else:
@@ -118,7 +118,7 @@ with st.sidebar.form("new_task"):
         if task:
             st.session_state.tasks.append(task)
             st.success("Tâche créée !")
-            st.experimental_rerun()
+            st.rerun()
 
 # -----------------------------
 # Sidebar – filtres
@@ -174,4 +174,4 @@ for idx, status in enumerate(ALL_STATUSES):
                             break
                     st.session_state.selected_task = None
                     st.success("Tâche déplacée !")
-                    st.experimental_rerun()
+                    st.rerun()
