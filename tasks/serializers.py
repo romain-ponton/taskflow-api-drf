@@ -75,6 +75,20 @@ class TaskSerializer(serializers.ModelSerializer):
 
     owner = UserSerializer(read_only=True)
     reporter = UserSerializer(read_only=True)
+    owner_id = serializers.PrimaryKeyRelatedField(
+        source="owner",
+        queryset=User.objects.all(),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    reporter_id = serializers.PrimaryKeyRelatedField(
+        source="reporter",
+        queryset=User.objects.all(),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
 
     # liens + pièces jointes + sous-tâches
     children = serializers.SerializerMethodField()
@@ -84,6 +98,14 @@ class TaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = Task
         fields = "__all__"
+
+    def to_internal_value(self, data):
+        data = data.copy()
+        if "owner" in data and "owner_id" not in data and not isinstance(data.get("owner"), dict):
+            data["owner_id"] = data.pop("owner")
+        if "reporter" in data and "reporter_id" not in data and not isinstance(data.get("reporter"), dict):
+            data["reporter_id"] = data.pop("reporter")
+        return super().to_internal_value(data)
 
     def get_children(self, obj):
         return TaskSerializer(obj.children.all(), many=True).data

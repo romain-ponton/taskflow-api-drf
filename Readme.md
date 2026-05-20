@@ -52,6 +52,22 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
+### Lancer le front Streamlit
+
+Dans un second terminal, avec l'environnement virtuel actif :
+
+```bash
+streamlit run streamlit_app.py
+```
+
+Sous Windows, sans activer l'environnement :
+
+```powershell
+venv\Scripts\python.exe -m streamlit run streamlit_app.py
+```
+
+Le front est disponible sur `http://localhost:8501`.
+
 ---
 
 ## 3. Endpoints API
